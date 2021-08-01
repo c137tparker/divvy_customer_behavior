@@ -1,4 +1,5 @@
-# customer_comparisons_using_R
+# divvy_customer_behavior
+## Using: R via R-Studio
 An analysis of user behavior for the Divvy bike share service in Chicago.
 
 A full walkthrough of the data manipulation, analysis, and visualization generation (all done entirely within R via RStudio) is provided in the RMD markdown file. A PDF version of the same info, which includes code outputs and visualizations, is also provided.
