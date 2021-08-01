@@ -1,0 +1,405 @@
+---
+title: 'Case Study: Divvy Bike-Share'
+author: "Travis Allen Parker"
+date: '2021-07-05'
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+***
+
+## Introduction
+
+This case study considers a hypothetical business task for Divvy, a bicycle ride-share program in Chicago. Divvy maintains 5,824 GPS-tracked bicycles and 692 parking stations across the city, offering single-ride passes, full-day passes, and annual memberships.
+
+In this scenario, prior financial analysis has found membership customers generate significantly more revenue than casual users. The company is therefore considering a shift in strategy from broad awareness towards encouraging existing casual users to become members. This would need to be approved by the executive team, who require convincing details to justify such a change.
+
+## Business Task
+
+Using the most recent 12 months of available ride tracking data, identify how casual riders (single-ride pass and full-day pass buyers) and annual members differ in their use of the service. Present the results to the executive committee, and offer suggestions on how to encourage casual riders to become members.
+
+***
+
+## Data Sourcing and Security
+
+The data for this case study is provided by Motivate International Inc. under an open license.
+
+* [Divvy Data License Agreement](https://www.divvybikes.com/data-license-agreement)
+
+* [Data Files Directory](https://divvy-tripdata.s3.amazonaws.com/index.html)
+
+The data consists of comma-separated value (CSV) files, each representing one month of ride data. We select most recent 12 months of data available (June 2020 through May 2021).
+
+To the best of our knowledge this data is reliable, as it is being provided by the original collector of the data. It is also fairly recent, so our analysis should be meaningful. We will be on guard against potential bias in the data, but at this point there are no concerns.
+
+***
+
+## Cleaning and Manipulation
+
+Since these files are too large to open in a spreadsheet program, we are using R (R-Studio) to manipulate and clean the data.
+
+To begin we install and load packages. The working directory is also set, to make file calls shorter. If running this analysis on your own machine, remove the comment marks in front of the installation commands for any packages you have not yet installed, and change your working directory path appropriately.
+
+```{r Install packages and set directory, message = FALSE}
+#install.packages("tidyverse")
+#install.packages("lubridate")
+#install.packages("geosphere")
+library(tidyverse) # Many functions; includes dypler, stringr, and ggplot2
+library(lubridate) # Useful date functions
+library(geosphere) # Will allow us to examine GPS coordinate data
+
+# Change the working directory
+setwd("C:/Users/sheri/Documents/R")
+```
+
+Download the CSV files into a folder (here named `case-study-divvy-data`) then load the files into data frames for manipulation.
+
+```{r Load raw data into dataframes, message = FALSE}
+df_2020_06 <- read_csv("case-study-divvy-data/202006-divvy-tripdata.csv")
+df_2020_07 <- read_csv("case-study-divvy-data/202007-divvy-tripdata.csv")
+df_2020_08 <- read_csv("case-study-divvy-data/202008-divvy-tripdata.csv")
+df_2020_09 <- read_csv("case-study-divvy-data/202009-divvy-tripdata.csv")
+df_2020_10 <- read_csv("case-study-divvy-data/202010-divvy-tripdata.csv")
+df_2020_11 <- read_csv("case-study-divvy-data/202011-divvy-tripdata.csv")
+df_2020_12 <- read_csv("case-study-divvy-data/202012-divvy-tripdata.csv")
+df_2021_01 <- read_csv("case-study-divvy-data/202101-divvy-tripdata.csv")
+df_2021_02 <- read_csv("case-study-divvy-data/202102-divvy-tripdata.csv")
+df_2021_03 <- read_csv("case-study-divvy-data/202103-divvy-tripdata.csv")
+df_2021_04 <- read_csv("case-study-divvy-data/202104-divvy-tripdata.csv")
+df_2021_05 <- read_csv("case-study-divvy-data/202105-divvy-tripdata.csv")
+```
+
+Before combining all of the data into a single data frame (incidentally, a UNION in SQL) first ensure the column names and data types all match. The `colnames()` and structure `str()` functions allow examination of all 12 data frames; for simplicity only representative results are displayed here (Nov 2020 and Dec 2020).
+
+```{r Compare dataframe column names, echo = FALSE, results= FALSE}
+colnames(df_2020_06)
+colnames(df_2020_07)
+colnames(df_2020_08)
+colnames(df_2020_09)
+colnames(df_2020_10)
+colnames(df_2020_11)
+colnames(df_2020_12)
+colnames(df_2021_01)
+colnames(df_2021_02)
+colnames(df_2021_03)
+colnames(df_2021_04)
+colnames(df_2021_05)
+
+str(df_2020_06)
+str(df_2020_07)
+str(df_2020_08)
+str(df_2020_09)
+str(df_2020_10)
+str(df_2020_11)
+str(df_2020_12)
+str(df_2021_01)
+str(df_2021_02)
+str(df_2021_03)
+str(df_2021_04)
+str(df_2021_05)
+```
+
+```{r Compare examples, message = TRUE}
+colnames(df_2020_11)
+colnames(df_2020_12)
+
+str(df_2020_11)
+str(df_2020_12)
+```
+
+Carefully looking through the results shows perfect matches in column names across all twelve data frames.
+
+If some inconsistencies had appeared we could use the `rename()` function as appropriate. For example:
+
+`df_2020_06 <- rename(df_2020_06, ride_id = trip_id)`
+
+Although the column names match, the `str()` function revealed a problem with the data types for the columns `start_station_id` and `end_station_id`. These columns are type `double` in months June 2020 to November 2020, but from December 2020 onward become type `character`. It seems the company decided to change the naming convention for its station IDs, adding some letters to the beginning of each. 
+
+Before combining the data frames we should change the datatypes in these columns to match the new convention. For this task the `mutate()` function from the `dplyr` package can be used. Only the first six data frames need to be changed.
+
+```{r Change station IDs of early tables into char type to match later tables}
+df_2020_06 <- df_2020_06 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+df_2020_07 <- df_2020_07 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+df_2020_08 <- df_2020_08 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+df_2020_09 <- df_2020_09 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+df_2020_10 <- df_2020_10 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+df_2020_11 <- df_2020_11 %>%
+              mutate(start_station_id = as.character(start_station_id),
+              end_station_id = as.character(end_station_id))
+```
+
+Checking with `str()` confirms the changes were made.
+
+***
+
+### Combining to a single data frame
+
+The data is now ready to be combined into a single data frame.
+
+```{r Combine all data to a single data frame}
+all_rides <- bind_rows(df_2020_06, df_2020_07, df_2020_08, df_2020_09,
+                df_2020_10, df_2020_11, df_2020_12, df_2021_01, df_2021_02,
+                df_2021_03, df_2021_04, df_2021_05)
+```
+
+Now that the data is together, it can be inspected more closely to see what cleaning may be required before analysis. Several general functions allow a scan for anything unusual or unexpected:
+
+```{r Checking data format for cleaning needs, results = FALSE}
+colnames(all_rides) # Not expecting anything new here
+dim(all_rides) # Finds the dimensions (rows and columns) of the data frame
+head(all_rides) # Gives a tibble of the first six rows
+str(all_rides) # Not expecting to see anything new here
+```
+
+```{r Summary data}
+summary(all_rides) # Some statistical data, might alert us to some problems
+```
+
+Most of the output for these functions raised no concerns, but the `summary()` function tells us columns `end_lat` and `end_lng` both have 5,037 entries listing "NA". Curiously, the `start_lat` and `start_lng` columns have no such lacking information. Speaking with the company supplying the data, we are informed these records represent bicycles being removed or added from service, or those that were stolen or otherwise lost. We can thus remove these records.
+
+```{r Remove rows for rides lacking ending coordinates}
+all_rides <- subset(all_rides, end_lat != 'NA' & end_lng != 'NA')
+```
+
+
+### Adding calculated values
+
+Knowing the duration of each ride is likely to be a helpful piece of information, so we will add a new column calculating those values. We can also calculate distance traveled "as the crow flies" by comparing the start and end latitude and longitude GPS coordinates with `distGeo()`. A quick check to ensure the values are numeric reveals the length not, so their type is converted.
+
+```{r Adding ride length, distance, date info, and day of week columns}
+
+# Using the base function `difftime()` we calculate trip duration into a new column.
+all_rides$ride_duration <- difftime(all_rides$ended_at, all_rides$started_at)
+
+# Using the `distGeo()` function from `geosphere` library to calculate trip distance into a new column.
+all_rides$ride_distance <- distGeo(matrix(c(all_rides$start_lng, all_rides$start_lat), ncol=2),
+                                 matrix(c(all_rides$end_lng, all_rides$end_lat), ncol=2))
+
+# A quick check to ensure these new values are numeric.
+is.numeric(all_rides$ride_duration)
+is.numeric(all_rides$ride_distance)
+
+# For some reason the length value isn't numeric, so we convert.
+all_rides$ride_duration <- as.numeric(all_rides$ride_duration)
+```
+
+We also add separate columns for the day, month, year, and day of the week that each ride took place, allowing us to examine each of those factors separately.
+
+```{r}
+# We convert the starting date/time to just the date, then use that to
+# calculate separate columns for year/month/day.
+all_rides$date <- as.Date(all_rides$started_at)
+all_rides$year <- format(as.Date(all_rides$date), "%Y")
+all_rides$month <- format(as.Date(all_rides$date), "%m")
+all_rides$day <- format(as.Date(all_rides$date), "%d")
+all_rides$day_of_week <- format(as.Date(all_rides$date), "%A")
+```
+
+### Removing Irrelevant / Bad Data
+
+Making another call to `summary(all_rides)` to check our progress, the minimum ride duration is negative. Our data source tells us trips with negative duration represent either errant or corrupted data, or situations where bikes were removed for maintenance. Maintenance rides, the company states, all have start stations "HQ QR". We can therefore delete all rides with negative duration and/or which started at HQ.
+
+We will put the data of interest into a new data frame, preserving the "deleted" data just in case.
+
+```{r Delete rows starting at HQ QR or with negative ride duration}
+# This logic checks if the start station is HQ or if the ride length is negative,
+# and only returns rows where that is not the case.
+
+rides_v2 <- subset(all_rides, start_station_name != "HQ QR" & ride_duration > 0)
+```
+
+We do a few final checks to ensure there are no hidden problems.
+
+The first column, `ride_id`, should be unique. We check that by counting the unique entries in that column and comparing it to the number of rows overall. We also check the `rideable_type` and `member_casual` columns to ensure they only contain valid entries.
+
+
+```{r Check certain columns for invalid entries}
+nrow(rides_v2)
+length(unique(rides_v2$ride_id))
+
+table(rides_v2$rideable_type)
+table(rides_v2$member_casual)
+```
+
+All appears well, with each row having a unique ride ID, and the `ridable_type` and `member_casual` columns have only valid entries (i.e., no misspellings or invalid options).
+
+We also check the station IDs and station names in a similar manner:
+
+```{r Checking for start station repeats}
+length(unique(rides_v2$start_station_id))
+length(unique(rides_v2$start_station_name))
+```
+
+```{r Checking for end station repeats}
+length(unique(rides_v2$end_station_id))
+length(unique(rides_v2$end_station_name))
+```
+We see there are many more station IDs than there are unique station names. However, earlier it was discovered the station ID convention had been changed to include some letters. We can hypothesize these "extra" station IDs are actually the same stations, just their old numeric-only IDs.
+
+Doing another search for only rides that occurred in 2021 (after the convention was changed) lends credence to this.
+
+```{r}
+later_rides <- rides_v2[rides_v2$year == "2021", ]
+length(unique(later_rides$start_station_id))
+length(unique(later_rides$start_station_name))
+length(unique(later_rides$end_station_id))
+length(unique(later_rides$end_station_name))
+```
+
+These numbers are much more in line with each other. The slight differences could be explained by some stations being renamed, closed, or opened in the past few months. We could confirm this with the company if needed.
+
+To fully clean the station ID column we would need to replace the old IDs with their corresponding updated ones. Depending on how the ID convention was altered it might be a relatively simple process involving the `paste()` function to add a few characters to the start of each string, or it could be quite tedious. It would depend on the precise details of the new naming convention. Such cleaning would be necessary should we wish to do meaningful analysis involving specific stations, for example analyzing the relative popularity of stations. Unfortunately, this data is not available to us.
+
+The remaining columns in the data frame were either calculated or used in calculations, so assuming no errors occurred during this process we can be reasonably confident the data in these columns are valid.
+
+***
+
+## Analysis
+
+Now that our data is cleaned and organized, and a few calculated values have been helpfully added, we can begin some analysis to answer the business task. We begin with a summary of ride duration, and some statistical comparisons between casual riders and members.
+
+```{r Comparing ride duration stats between casuals and members}
+summary(rides_v2$ride_duration)
+aggregate(rides_v2$ride_duration ~ rides_v2$member_casual, FUN = mean)
+aggregate(rides_v2$ride_duration ~ rides_v2$member_casual, FUN = median)
+aggregate(rides_v2$ride_duration ~ rides_v2$member_casual, FUN = max)
+aggregate(rides_v2$ride_duration ~ rides_v2$member_casual, FUN = min)
+```
+The results indicate a clear tendency for casual users to ride for longer duration than members. But let's see how that compares to actual distance ridden. Dividing distance by duration also lets us compare travel speed.
+
+```{r Comparing ride distance stats between casuals and members}
+summary(rides_v2$ride_distance)
+aggregate(rides_v2$ride_distance ~ rides_v2$member_casual, FUN = mean)
+aggregate(rides_v2$ride_distance ~ rides_v2$member_casual, FUN = median)
+aggregate(rides_v2$ride_distance ~ rides_v2$member_casual, FUN = max)
+aggregate(rides_v2$ride_distance ~ rides_v2$member_casual, FUN = min)
+```
+Interestingly, the average (mean) and median distances traveled don't meaningfully differ between casual riders and members. This is expected to result in a slower average riding speed for casual users (below).
+
+Despite the average distances being similar, it is worth nothing that members do tend to have longer maximum distances; these are likely outliers however, as the higher maximum didn't have enough weight to shift the mean.
+
+```{r Comparing riding speed between casuals and members}
+summary(rides_v2$ride_distance / rides_v2$ride_duration)
+aggregate((rides_v2$ride_distance / rides_v2$ride_duration) ~ rides_v2$member_casual, FUN = mean)
+aggregate((rides_v2$ride_distance / rides_v2$ride_duration) ~ rides_v2$member_casual, FUN = median)
+aggregate((rides_v2$ride_distance / rides_v2$ride_duration) ~ rides_v2$member_casual, FUN = max)
+aggregate((rides_v2$ride_distance / rides_v2$ride_duration) ~ rides_v2$member_casual, FUN = min)
+```
+As we expected for having shorter average travel duration yet similar travel distances, members tend to ride faster than casual users: Approximately 50% faster on average, and in some cases up to 75% faster.
+
+Taking all of this information together, we can hypothesize that members may be more intentional riders that stick to consistent routes, such as commuting to work or running regular errands. Alternatively, casual riders are more likely to "go on a ride", traveling at a more leisurely rate and for a longer time.
+
+We might see a difference in behavior depending on the day of the week. We first reorder the days of the week to be sequential rather than alphabetical, then compare ride duration.
+
+```{r Reorder days of the week to standard order}
+rides_v2$day_of_week <- ordered(rides_v2$day_of_week, levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+aggregate(rides_v2$ride_duration ~ rides_v2$member_casual + rides_v2$day_of_week, FUN = mean)
+```
+Here we can see ride duration is a bit higher on the weekends, but no matter the day the casual riders tend to ride at least twice as long as members, sometimes nearly three times as long.
+
+To clean things up, let's create and view a table with shortened day names using the `wday()` function, as well as a calculated average duration, and with results grouped by member status and sorted by day of the week.
+
+```{r Cleaned up results table, message=FALSE}
+rides_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>%  # creates weekday field wday()
+  group_by(member_casual, weekday) %>%  # groups by user type and then weekday status
+  summarise(number_of_rides = n(), 	# calculates number of rides... 
+  average_duration = mean(ride_duration)) %>% 		# and the average duration
+  arrange(member_casual, weekday)	# sorts for presentation; overrides weekday grouping
+```
+***
+
+### Visualizations
+
+To begin, let's see the number of rides by rider type. And we can export a .jpeg image of the result.
+
+```{r Plotting number of rides, message=FALSE}
+rides_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n() / 1000,
+            average_duration = mean(ride_duration)) %>% 
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(x = "Day of the Week", y = "Number of Rides (thousands)", fill = "User Status") +
+  scale_fill_manual(values = c("#4285f4", "#f4b400"))
+
+# Uncomment to save an image of the result.
+# jpeg(file = "number_of_rides.jpeg")
+```
+
+We see here that members are fairly consistent in the number of rides taken, gradually increasing through the week but overall with little change. This is not quite what we would have expected if we assumed members were work commuters; it seems a stretch to assume bicycle commuters would largely ride their bikes just as much on the weekends.
+
+So perhaps members represent those with more consistent needs, such as for personal obligations and errands. They could also represent exercise enthusiasts, who would be more likely to cycle consistently whether or not they happen to be commuting as well. Or they could indeed largely consist of commuters, if Chicago's bike share user population tends to work throughout the week.
+
+By comparison, the casual users have such a clear preference for the weekends they even take more rides than members on those days. This would be expected if one assumes casual riders are more likely to cycle for entertainment, exercise, or other casual reasons. However, there is a fairly large chunk of the casual user base who consistently ride during the week as well. This group may be the best to target for conversion to membership.
+
+We can also compare average trip duration:
+
+```{r Trip duration plot, message = FALSE}
+rides_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_duration) / 60) %>% 
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(x = "Day of the Week", y = "Average Ride Duration (mins)", fill = "User Status") +
+  scale_fill_manual(values = c("#4285f4", "#f4b400"))
+
+# Export an image
+# jpeg(file = "ride_duration.jpeg")
+```
+
+For members, once again we see consistent behavior. Not only do members tend to make just as many rides every day of the week, they also tend to ride for a similar length of time every day (although, there is a slight increase in duration on the weekends). This is consistent with the hypothesis that members have a utilitarian purpose in mind when using the bikes, however it would suggest that not many of them may be work commuters (unless workers in the area tend to work without regard to a standard Monday through Friday schedule).
+
+Casual user ride duration is also remarkable, showing much longer lengths of time than members on average. Casual rides average at least twice as long, and often three times as long. In addition, casual use doesn't change hugely during the week compared to the weekend, though weekend rides do have slightly higher ride times.
+
+***
+
+## Conclusion and recommendations
+
+Member ride patterns are very consistent regardless of the day of the week. Whether during the work week or the weekend, members show little variation in the number of rides taken or the length of time spent riding (approximately 15 minutes per ride). In addition, members tend to ride more quickly, riding on average 150% the speeds of casual users.
+
+**This suggests members are more likely to be riding for the sake of commuting, or a regular exercise program, or to travel for personal obligations.** Commuting assumes, however, that the population of users for the Divvy service tend to work throughout the week, rather than being heavily focused on traditional Monday-Friday scheduling.
+
+In contrast, casual riders tend to take fewer rides during the weekdays, but then nearly double their number of rides on the weekends. However, regardless of the day of the week, casual riders consistently travel 2-3 times as long as members, and travel at a more leisurely pace.
+
+**This suggests many casual riders are more likely riding for personal enjoyment or casual needs, and not out of a necessity to travel.** However, a significant portion of casual users consistently ride during the traditional work week. This fraction of the casual user base may be following a similar pattern of use as member users, and so may be prime targets for conversion to membership.
+
+***
+
+Based on this information, here are our top recommendations to convince casual riders to purchase annual memberships:
+
+* Add features to bikes that expand their utility for personal errands and obligations. For example, add drink holders, baskets, and perhaps baby carriers to some bikes. The data suggests annual members are people who have a consistent need for transportation to fulfill their personal obligations, even outside of work. They may be running to the grocery store or grabbing a coffee. In other words, members use bike-sharing for their everyday miscellaneous transportation needs (though not necessarily for work commuting). Therefore, making the bikes more amenable to errand-like activities may increase the value to casual users, encouraging them to become members.
+
+* Perform further analysis comparing user type and station use. If a particular type of customer is more likely to use a certain station, for example, this may provide more insight into the needs and thoughts of the customers. Or at the very least, it can allow for more targeted advertising; for instance, one may want to spend less time and money advertising for memberships at stations that already serve a high proportion of members. Station popularity data can also help when determining how to best distribute bikes, or where to add more stations to meet heavy demand and where to possibly remove underused stations.
+
+* Do not focus heavily on marketing methods that encourage bike-share as an alternative form of commute. For example, heavy advertising within cabs, buses, or subways is not likely to be very effective. Casual users are already familiar with the bike-share service, and if using it for commuting were a good choice for them they most likely would have already signed up for membership. Instead, marketing that features the utility of the bikes for quick, easy, and inexpensive utility may be more encouraging.
+
+***
+
+Although we performed all of our analysis within this R markdown file, we can take our final data frame and export it for potential use in other software, such as Excel and Tableau.
+
+```{r}
+counts <-aggregate(rides_v2$ride_duration ~ rides_v2$member_casual + rides_v2$day_of_week, FUN = mean)
+write.csv(counts, file = "avg_ride_length.csv")
+```
+
+### End of document.
